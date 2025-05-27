@@ -150,35 +150,102 @@ def process_data(data, theta0):
     
     return x, theta_plot, y, phase_diff
 
-def create_polar_plot(theta_plot, curr_idx, title):
-    """極座標プロットを作成"""
-    fig = go.Figure()
+def create_plots_with_placeholders(x, theta_plot, y, data, curr_idx):
+    """プロットを作成し、プレースホルダーを返す"""
     
-    # 現在の点
-    fig.add_trace(go.Scatterpolar(
+    # 現在時刻
+    current_time = data['time'].iloc[curr_idx]
+    
+    # 1. 基準系位相角（極座標）
+    polar_fig1 = go.Figure()
+    polar_fig1.add_trace(go.Scatterpolar(
         r=[1],
         theta=[np.degrees(theta_plot[curr_idx])],
         mode='markers',
         marker=dict(size=15, color='red'),
         name='現在位置'
     ))
-    
-    fig.update_layout(
+    polar_fig1.update_layout(
         polar=dict(
             radialaxis=dict(range=[0, 1.1], visible=True),
-            angularaxis=dict(
-                direction='clockwise',
-                rotation=90
-            )
+            angularaxis=dict(direction='clockwise', rotation=90)
         ),
-        title=title,
+        title=f"基準系での全位相wrap, 時刻: {current_time}",
         height=300
     )
     
-    return fig
+    # 2. XY散布図
+    xy_fig = go.Figure()
+    xy_fig.add_trace(go.Scatter(
+        x=x[:curr_idx+1],
+        y=y[:curr_idx+1],
+        mode='markers',
+        marker=dict(size=8, color='blue', opacity=0.6),
+        name='履歴'
+    ))
+    xy_fig.add_trace(go.Scatter(
+        x=[x[curr_idx]],
+        y=[y[curr_idx]],
+        mode='markers',
+        marker=dict(size=15, color='red'),
+        name='現在位置'
+    ))
+    
+    if curr_idx > 0:
+        center_x = np.mean(x[:curr_idx+1])
+        center_y = np.mean(y[:curr_idx+1])
+        radius = np.std(x[:curr_idx+1])
+        theta_circle = np.linspace(0, 2*np.pi, 100)
+        circle_x = center_x + radius * np.cos(theta_circle)
+        circle_y = center_y + radius * np.sin(theta_circle)
+        xy_fig.add_trace(go.Scatter(
+            x=circle_x, y=circle_y, mode='lines',
+            line=dict(dash='dash', color='black'), name='標準偏差円'
+        ))
+    
+    xy_fig.update_layout(
+        title="基準系での相対位相 × freq [rad/s] 散布図",
+        xaxis_title='相対位相 [deg]（±180°wrap）',
+        yaxis_title='周波数 [rad/s]',
+        xaxis=dict(range=[-180, 180]),
+        height=300
+    )
+    
+    # 3. 極座標プロット（周波数）
+    polar_fig2 = go.Figure()
+    polar_fig2.add_trace(go.Scatterpolar(
+        r=data['freq'][:curr_idx+1],
+        theta=np.degrees(theta_plot[:curr_idx+1]),
+        mode='markers',
+        marker=dict(size=8, color='teal', opacity=0.6),
+        name='履歴'
+    ))
+    polar_fig2.add_trace(go.Scatterpolar(
+        r=[data['freq'][curr_idx]],
+        theta=[np.degrees(theta_plot[curr_idx])],
+        mode='markers',
+        marker=dict(size=15, color='red'),
+        name='現在位置'
+    ))
+    polar_fig2.update_layout(
+        polar=dict(
+            radialaxis=dict(range=[min(data['freq']), max(data['freq'])]),
+            angularaxis=dict(direction='clockwise', rotation=90)
+        ),
+        title='極座標: 周波数(半径) × 基準系位相角(角度)',
+        height=300
+    )
+    
+    # 4. Power Angle Curve
+    power_fig = create_power_angle_curve(x, curr_idx)
+    
+    # 5. 時系列プロット
+    time_fig = create_time_series(data['time'], x, data['freq'], curr_idx)
+    
+    return polar_fig1, xy_fig, polar_fig2, power_fig, time_fig
 
 def create_xy_scatter(x, y, curr_idx, title):
-    """XY散布図を作成"""
+    """XY散布図を作成（未使用になったため残しておく）"""
     fig = go.Figure()
     
     # 履歴データ
@@ -391,6 +458,8 @@ def main():
         st.session_state.current_idx = 0
     if 'animation_running' not in st.session_state:
         st.session_state.animation_running = False
+    if 'plot_containers' not in st.session_state:
+        st.session_state.plot_containers = None
     
     # コントロールボタン
     col1, col2, col3, col4 = st.sidebar.columns(4)
@@ -448,68 +517,65 @@ def main():
     current_time = data['time'].iloc[curr_idx]
     st.sidebar.write(f"現在時刻: {current_time}")
     
-    # メインプロット領域
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # 基準系での全ての位相wrap
-        polar_fig1 = create_polar_plot(theta_plot, curr_idx, 
-                                     f"基準系での全位相wrap, 時刻: {current_time}")
-        st.plotly_chart(polar_fig1, use_container_width=True)
+    # メインプロット領域（プレースホルダーを使用してちらつき防止）
+    if st.session_state.plot_containers is None:
+        # 初回のみプレースホルダーを作成
+        col1, col2 = st.columns(2)
         
-        # XY散布図
-        xy_fig = create_xy_scatter(x, y, curr_idx, 
-                                 "基準系での相対位相 × freq [rad/s] 散布図")
-        st.plotly_chart(xy_fig, use_container_width=True)
-    
-    with col2:
-        # 極座標プロット（周波数）
-        polar_fig2 = go.Figure()
-        polar_fig2.add_trace(go.Scatterpolar(
-            r=data['freq'][:curr_idx+1],
-            theta=np.degrees(theta_plot[:curr_idx+1]),
-            mode='markers',
-            marker=dict(size=8, color='teal', opacity=0.6),
-            name='履歴'
-        ))
-        polar_fig2.add_trace(go.Scatterpolar(
-            r=[data['freq'][curr_idx]],
-            theta=[np.degrees(theta_plot[curr_idx])],
-            mode='markers',
-            marker=dict(size=15, color='red'),
-            name='現在位置'
-        ))
-        polar_fig2.update_layout(
-            polar=dict(
-                radialaxis=dict(range=[min(data['freq']), max(data['freq'])]),
-                angularaxis=dict(direction='clockwise', rotation=90)
-            ),
-            title='極座標: 周波数(半径) × 基準系位相角(角度)',
-            height=300
-        )
-        st.plotly_chart(polar_fig2, use_container_width=True)
+        with col1:
+            polar_placeholder1 = st.empty()
+            xy_placeholder = st.empty()
         
-        # Power Angle Curve
-        power_fig = create_power_angle_curve(x, curr_idx)
-        st.plotly_chart(power_fig, use_container_width=True)
+        with col2:
+            polar_placeholder2 = st.empty()
+            power_placeholder = st.empty()
+        
+        # 時系列プロット用プレースホルダー
+        st.markdown("### 時系列データ")
+        time_placeholder = st.empty()
+        
+        # プレースホルダーをセッション状態に保存
+        st.session_state.plot_containers = {
+            'polar1': polar_placeholder1,
+            'xy': xy_placeholder,
+            'polar2': polar_placeholder2,
+            'power': power_placeholder,
+            'time': time_placeholder
+        }
     
-    # 時系列プロット（全幅）
-    st.markdown("### 時系列データ")
-    time_fig = create_time_series(data['time'], x, data['freq'], curr_idx)
-    st.plotly_chart(time_fig, use_container_width=True)
+    # プロットを作成して既存のプレースホルダーに描画
+    polar_fig1, xy_fig, polar_fig2, power_fig, time_fig = create_plots_with_placeholders(
+        x, theta_plot, y, data, curr_idx
+    )
     
-    # アニメーション処理（改良版：ちらつき最小化）
+    # プレースホルダーに描画（再作成ではなく更新）
+    with st.session_state.plot_containers['polar1']:
+        st.plotly_chart(polar_fig1, use_container_width=True, key=f"polar1_{curr_idx}")
+    
+    with st.session_state.plot_containers['xy']:
+        st.plotly_chart(xy_fig, use_container_width=True, key=f"xy_{curr_idx}")
+    
+    with st.session_state.plot_containers['polar2']:
+        st.plotly_chart(polar_fig2, use_container_width=True, key=f"polar2_{curr_idx}")
+    
+    with st.session_state.plot_containers['power']:
+        st.plotly_chart(power_fig, use_container_width=True, key=f"power_{curr_idx}")
+    
+    with st.session_state.plot_containers['time']:
+        st.plotly_chart(time_fig, use_container_width=True, key=f"time_{curr_idx}")
+    
+    # アニメーション処理（ちらつき防止版）
     if st.session_state.animation_running and st.session_state.current_idx < max_idx:
-        # 次のフレームを準備
+        # バックグラウンドで次のフレームを準備
         st.session_state.current_idx = min(max_idx, st.session_state.current_idx + speed)
-        # 更新頻度を調整（高速時は間隔を短く、低速時は長く）
-        sleep_time = max(0.05, 0.2 / max(speed, 1))
+        # フレーム間隔を調整
+        sleep_time = max(0.02, 0.1 / max(speed, 1))
         time.sleep(sleep_time)
+        # プロットの再描画を最小限に抑制
         st.rerun()
     elif st.session_state.animation_running and st.session_state.current_idx >= max_idx:
         # アニメーション終了
         st.session_state.animation_running = False
-        st.rerun()
     
     # データ情報表示
     st.sidebar.markdown("---")
