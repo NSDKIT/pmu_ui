@@ -16,10 +16,6 @@ def load_data_from_files(freq_file, phase_file):
         data_f = pd.read_csv(freq_file)
         data_p = pd.read_csv(phase_file)
         
-        # 欠損値を0で補完
-        data_f = data_f.fillna(0)
-        data_p = data_p.fillna(0)
-        
         # 時刻データの処理
         time_f = pd.to_datetime(data_f.iloc[:, 0], errors='coerce')
         time_p = pd.to_datetime(data_p.iloc[:, 0], errors='coerce')
@@ -33,25 +29,35 @@ def load_data_from_files(freq_file, phase_file):
         freq = data_f.iloc[:N, 1].values          # 2列目（対象カラム）
         t = time_p[:N]
         
-        # NaNが残っている場合は0で補完
-        phase_target = np.nan_to_num(phase_target, nan=0.0)
-        phase_ref = np.nan_to_num(phase_ref, nan=0.0)
-        freq = np.nan_to_num(freq, nan=50.0)  # 周波数のデフォルトは50Hz
+        # 有効データのマスクを作成（NaNまたは空文字でないデータ）
+        valid_mask_p = ~(pd.isna(phase_target) | pd.isna(phase_ref) | 
+                        (phase_target == '') | (phase_ref == ''))
+        valid_mask_f = ~(pd.isna(freq) | (freq == ''))
+        valid_mask = valid_mask_p & valid_mask_f
+        
+        # 有効データのみを抽出
+        phase_target_clean = phase_target[valid_mask]
+        phase_ref_clean = phase_ref[valid_mask]
+        freq_clean = freq[valid_mask]
+        t_clean = t[valid_mask]
         
         # データ品質情報をログ出力
-        missing_phase_target = np.sum(data_p.iloc[:N, 1].isna())
-        missing_phase_ref = np.sum(data_p.iloc[:N, 2].isna())
-        missing_freq = np.sum(data_f.iloc[:N, 1].isna())
+        skipped_count = N - len(phase_target_clean)
+        if skipped_count > 0:
+            st.info(f"欠損データをスキップしました: {skipped_count}個のデータポイント（全体の{skipped_count/N*100:.1f}%）")
         
-        if missing_phase_target > 0 or missing_phase_ref > 0 or missing_freq > 0:
-            st.info(f"欠損値を0で補完しました: 対象位相={missing_phase_target}個, 基準位相={missing_phase_ref}個, 周波数={missing_freq}個")
+        # 有効なデータが少なすぎる場合の警告
+        if len(phase_target_clean) < 10:
+            st.warning(f"有効なデータが少なすぎます: {len(phase_target_clean)}個")
         
         return {
-            'phase_target': phase_target,
-            'phase_ref': phase_ref,
-            'freq': freq,
-            'time': t,
-            'N': N
+            'phase_target': phase_target_clean,
+            'phase_ref': phase_ref_clean,
+            'freq': freq_clean,
+            'time': t_clean,
+            'N': len(phase_target_clean),
+            'original_N': N,
+            'skipped_count': skipped_count
         }
         
     except Exception as e:
@@ -76,10 +82,6 @@ def load_data():
         data_f = pd.read_csv(freq_file)
         data_p = pd.read_csv(phase_file)
         
-        # 欠損値を0で補完
-        data_f = data_f.fillna(0)
-        data_p = data_p.fillna(0)
-        
         # 時刻データの処理
         time_f = pd.to_datetime(data_f.iloc[:, 0], errors='coerce')
         time_p = pd.to_datetime(data_p.iloc[:, 0], errors='coerce')
@@ -93,17 +95,29 @@ def load_data():
         freq = data_f.iloc[:N, 1].values          # 2列目（対象カラム）
         t = time_p[:N]
         
-        # NaNが残っている場合は0で補完
-        phase_target = np.nan_to_num(phase_target, nan=0.0)
-        phase_ref = np.nan_to_num(phase_ref, nan=0.0)
-        freq = np.nan_to_num(freq, nan=50.0)  # 周波数のデフォルトは50Hz
+        # 有効データのマスクを作成（NaNまたは空文字でないデータ）
+        valid_mask_p = ~(pd.isna(phase_target) | pd.isna(phase_ref) | 
+                        (phase_target == '') | (phase_ref == ''))
+        valid_mask_f = ~(pd.isna(freq) | (freq == ''))
+        valid_mask = valid_mask_p & valid_mask_f
+        
+        # 有効データのみを抽出
+        phase_target_clean = phase_target[valid_mask]
+        phase_ref_clean = phase_ref[valid_mask]
+        freq_clean = freq[valid_mask]
+        t_clean = t[valid_mask]
+        
+        # データ品質情報
+        skipped_count = N - len(phase_target_clean)
         
         return {
-            'phase_target': phase_target,
-            'phase_ref': phase_ref,
-            'freq': freq,
-            'time': t,
-            'N': N
+            'phase_target': phase_target_clean,
+            'phase_ref': phase_ref_clean,
+            'freq': freq_clean,
+            'time': t_clean,
+            'N': len(phase_target_clean),
+            'original_N': N,
+            'skipped_count': skipped_count
         }, (freq_file, phase_file)
         
     except Exception as e:
@@ -112,13 +126,12 @@ def load_data():
 
 def process_data(data, theta0):
     """データを処理する"""
-    # データに欠損値がないことを確認（念のため再チェック）
-    phase_target = np.nan_to_num(data['phase_target'], nan=0.0)
-    phase_ref = np.nan_to_num(data['phase_ref'], nan=0.0)
-    freq = np.nan_to_num(data['freq'], nan=50.0)
+    # データは既にクリーンアップ済みなので、そのまま使用
+    phase_target = data['phase_target']
+    phase_ref = data['phase_ref']
+    freq = data['freq']
     
     # 連続位相角の計算（unwrap相当）
-    # 0値が多い場合のunwrap処理を安全に実行
     try:
         phase_target_cont = np.degrees(np.unwrap(np.radians(phase_target)))
         phase_ref_cont = np.degrees(np.unwrap(np.radians(phase_ref)))
@@ -134,11 +147,6 @@ def process_data(data, theta0):
     x = ((phase_diff + theta0 + 180) % 360) - 180
     theta_plot = np.radians(x)
     y = 2 * np.pi * freq
-    
-    # 無限大や異常値をチェック
-    x = np.nan_to_num(x, nan=0.0, posinf=180.0, neginf=-180.0)
-    theta_plot = np.nan_to_num(theta_plot, nan=0.0)
-    y = np.nan_to_num(y, nan=2*np.pi*50.0)  # デフォルト50Hz
     
     return x, theta_plot, y, phase_diff
 
@@ -506,23 +514,15 @@ def main():
     # データ情報表示
     st.sidebar.markdown("---")
     st.sidebar.markdown("### データ情報")
-    st.sidebar.write(f"データ点数: {data['N']}")
+    st.sidebar.write(f"有効データ点数: {data['N']}")
+    if 'original_N' in data:
+        st.sidebar.write(f"元データ点数: {data['original_N']}")
+        if data['skipped_count'] > 0:
+            st.sidebar.write(f"スキップ数: {data['skipped_count']} ({data['skipped_count']/data['original_N']*100:.1f}%)")
+    
     if filenames[0] and filenames[1]:
         st.sidebar.write(f"周波数ファイル: {filenames[0]}")
         st.sidebar.write(f"位相ファイル: {filenames[1]}")
-    
-    # データ品質情報
-    st.sidebar.markdown("### データ品質")
-    phase_target_zeros = np.sum(data['phase_target'] == 0)
-    phase_ref_zeros = np.sum(data['phase_ref'] == 0)
-    freq_zeros = np.sum(data['freq'] == 50.0)  # デフォルト値
-    
-    if phase_target_zeros > 0:
-        st.sidebar.write(f"対象位相の0値: {phase_target_zeros}個")
-    if phase_ref_zeros > 0:
-        st.sidebar.write(f"基準位相の0値: {phase_ref_zeros}個")
-    if freq_zeros > 0:
-        st.sidebar.write(f"周波数のデフォルト値: {freq_zeros}個")
     
     # ファイルフォーマット説明
     st.sidebar.markdown("---")
@@ -538,8 +538,9 @@ def main():
     - 3列目: 基準位相角
     
     **欠損値処理**
-    - 位相角: 0°で補完
-    - 周波数: 50Hzで補完
+    - 空データ・NaN値はスキップ
+    - 有効なデータのみ使用
+    - 時系列の連続性は保持
     """)
 
 if __name__ == "__main__":
