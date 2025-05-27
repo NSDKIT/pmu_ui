@@ -86,13 +86,16 @@ def get_power_curve(phase_diff, theta0, E=1.0, V=1.0, X=0.3):
     return delta, P
 
 def create_plots(data, curr_idx, theta0):
-    """プロット作成"""
+    """プロット作成（確実に更新されるように改良）"""
     x, theta = get_processed_phase(data['phase_diff'], theta0)
     xs, _ = get_processed_phase(data['phase_diff_s'], theta0)
     y = 2*np.pi*data['freq']
     r = np.ones(data['N'])
     
+    # 新しい図を毎回作成
+    plt.ioff()  # インタラクティブモードを無効化
     fig = plt.figure(figsize=(15, 8))
+    fig.clear()  # 図をクリア
     gs = GridSpec(2, 3, figure=fig)
     
     # 左上：円グラフ
@@ -160,6 +163,10 @@ def create_plots(data, curr_idx, theta0):
     ax_power.set_title('Power Angle Curve: P=(EV/X)sin(δ)')
     
     plt.tight_layout()
+    
+    # 図が確実に更新されるように現在の状態を記録
+    fig.suptitle(f'PMU Analysis - Index: {curr_idx} / Time: {data["t"].iloc[curr_idx]}', fontsize=8, y=0.98)
+    
     return fig
 
 def main():
@@ -221,26 +228,32 @@ def main():
                 st.session_state.curr_idx = 0
                 st.rerun()
         
-        # 自動再生の実行
+        # 自動再生の実行（より確実な更新のため）
         if auto_play and st.session_state.curr_idx < data['N'] - 1:
             # インデックスを進める
+            old_idx = st.session_state.curr_idx
             st.session_state.curr_idx = min(st.session_state.curr_idx + speed, data['N'] - 1)
-            # 短い待機時間でスムーズなアニメーション
-            time.sleep(0.05)
-            st.rerun()
+            
+            # インデックスが実際に変更された場合のみ再実行
+            if st.session_state.curr_idx != old_idx:
+                time.sleep(0.1)  # 少し待機
+                st.rerun()
         elif auto_play and st.session_state.curr_idx >= data['N'] - 1:
             # 終了時の処理
             st.session_state.auto_play = False
             st.success("✅ アニメーション完了！")
         
-        # プロット作成・表示（プレースホルダーを使用）
-        if 'plot_placeholder' not in st.session_state:
-            st.session_state.plot_placeholder = st.empty()
+        # 手動更新ボタンも追加（テスト用）
+        if st.button("🔄 手動更新"):
+            st.rerun()
         
-        with st.session_state.plot_placeholder.container():
-            fig = create_plots(data, st.session_state.curr_idx, theta0)
-            st.pyplot(fig, clear_figure=True)
-            plt.close(fig)  # メモリリーク防止
+        # プロット表示用のキーを動的に生成（強制更新のため）
+        plot_key = f"plot_{st.session_state.curr_idx}_{theta0}_{int(time.time()*1000) % 1000}"
+        
+        # プロット作成・表示
+        fig = create_plots(data, st.session_state.curr_idx, theta0)
+        st.pyplot(fig, key=plot_key, clear_figure=True)
+        plt.close(fig)  # メモリリーク防止
         
         # 情報表示
         st.subheader("現在の情報")
