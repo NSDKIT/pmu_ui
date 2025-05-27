@@ -207,15 +207,18 @@ def main():
         with col1:
             if st.button("▶️ Start", key="start_btn"):
                 st.session_state.auto_play = True
+                # すぐに再生を開始するためにrerunは不要
         
         with col2:
             if st.button("⏹️ Stop", key="stop_btn"):
                 st.session_state.auto_play = False
+                # 停止時もrerunは不要
         
         with col3:
             if st.button("🔄 Reset", key="reset_btn"):
                 st.session_state.curr_idx = 0
                 st.session_state.auto_play = False
+                # リセット時もrerunは不要（状態変更で自動的に再描画）
         
         with col4:
             speed = st.selectbox("再生速度", options=[1, 2, 5, 10, 20, 50, 100], index=3, key="speed_select")
@@ -255,7 +258,6 @@ def main():
                 # 終了時の処理
                 st.session_state.auto_play = False
                 st.success("✅ アニメーション完了！")
-                st.rerun()
         
         # 情報表示
         st.subheader("現在の情報")
