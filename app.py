@@ -1,5 +1,4 @@
-# 現在のインデックスを取得（アニメーション状態に関係なく）
-curr_idx = st.session_state.current_idximport streamlit as st
+import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
@@ -391,6 +390,9 @@ def main():
             disabled=True,
             key="time_slider_disabled"
         )
+    
+    # 現在のインデックスを取得
+    curr_idx = st.session_state.current_idx
     
     # 現在時刻の表示
     current_time = data['time'].iloc[curr_idx]
