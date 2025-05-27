@@ -178,6 +178,9 @@ def main():
         
         data = st.session_state.data
         
+        # 自動再生状態を最初に取得
+        auto_play = st.session_state.get('auto_play', False)
+        
         # 制御パネル
         col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 2, 1])
         
@@ -204,13 +207,6 @@ def main():
         
         with col5:
             theta0 = st.selectbox("基準θ₀[deg]", options=list(range(0, 45, 5)), index=6)
-        
-        # リアルタイム更新のためのプレースホルダー
-        if 'placeholder' not in st.session_state:
-            st.session_state.placeholder = st.empty()
-        
-        # 自動再生機能
-        auto_play = st.session_state.get('auto_play', False)
         
         # 自動再生状態の表示
         status_col1, status_col2 = st.columns([3, 1])
