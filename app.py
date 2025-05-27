@@ -225,20 +225,26 @@ def main():
         if auto_play and st.session_state.curr_idx < data['N'] - 1:
             # インデックスを進める
             st.session_state.curr_idx = min(st.session_state.curr_idx + speed, data['N'] - 1)
-            time.sleep(0.1)  # 待機時間
+            # 短い待機時間でスムーズなアニメーション
+            time.sleep(0.05)
             st.rerun()
         elif auto_play and st.session_state.curr_idx >= data['N'] - 1:
             # 終了時の処理
             st.session_state.auto_play = False
-            st.balloons()  # アニメーション終了の視覚的フィードバック
+            st.success("✅ アニメーション完了！")
         
-        # プロット作成・表示
-        fig = create_plots(data, st.session_state.curr_idx, theta0)
-        st.pyplot(fig)
+        # プロット作成・表示（プレースホルダーを使用）
+        if 'plot_placeholder' not in st.session_state:
+            st.session_state.plot_placeholder = st.empty()
+        
+        with st.session_state.plot_placeholder.container():
+            fig = create_plots(data, st.session_state.curr_idx, theta0)
+            st.pyplot(fig, clear_figure=True)
+            plt.close(fig)  # メモリリーク防止
         
         # 情報表示
         st.subheader("現在の情報")
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
             st.metric("現在時刻", str(data['t'].iloc[st.session_state.curr_idx]))
@@ -251,6 +257,16 @@ def main():
             x, _ = get_processed_phase(data['phase_diff'], theta0)
             current_phase = x[st.session_state.curr_idx]
             st.metric("θ₀基準相対位相 [deg]", f"{current_phase:.1f}")
+        
+        with col4:
+            st.metric("インデックス", f"{st.session_state.curr_idx}/{data['N']-1}")
+        
+        # デバッグ情報（開発時のみ表示）
+        if st.checkbox("デバッグ情報を表示"):
+            st.write(f"自動再生状態: {auto_play}")
+            st.write(f"現在のインデックス: {st.session_state.curr_idx}")
+            st.write(f"総データ数: {data['N']}")
+            st.write(f"再生速度: {speed}")
         
     except FileNotFoundError as e:
         st.error(f"CSVファイルが見つかりません: {e}")
