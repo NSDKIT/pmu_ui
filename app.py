@@ -244,15 +244,16 @@ def main():
             st.success("✅ アニメーション完了！")
         
         # 手動更新ボタンも追加（テスト用）
-        if st.button("🔄 手動更新"):
-            st.rerun()
+        col_manual1, col_manual2 = st.columns([1, 4])
+        with col_manual1:
+            if st.button("🔄 手動更新"):
+                # 強制的にセッション状態を更新
+                st.session_state.force_update = not st.session_state.get('force_update', False)
+                st.rerun()
         
-        # プロット表示用のキーを動的に生成（強制更新のため）
-        plot_key = f"plot_{st.session_state.curr_idx}_{theta0}_{int(time.time()*1000) % 1000}"
-        
-        # プロット作成・表示
+        # プロット作成・表示（シンプルな方法）
         fig = create_plots(data, st.session_state.curr_idx, theta0)
-        st.pyplot(fig, key=plot_key, clear_figure=True)
+        st.pyplot(fig)
         plt.close(fig)  # メモリリーク防止
         
         # 情報表示
