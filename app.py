@@ -1,4 +1,5 @@
-import streamlit as st
+# 現在のインデックスを取得（アニメーション状態に関係なく）
+    curr_idx = st.session_state.current_idximport streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
@@ -370,16 +371,26 @@ def main():
         index=3  # デフォルト10
     )
     
-    # スライダー
-    curr_idx = st.sidebar.slider(
-        "時刻インデックス",
-        min_value=0,
-        max_value=max_idx,
-        value=st.session_state.current_idx,
-        key="time_slider"
-    )
-    
-    st.session_state.current_idx = curr_idx
+    # スライダー（アニメーション中は無効化）
+    if not st.session_state.animation_running:
+        curr_idx = st.sidebar.slider(
+            "時刻インデックス",
+            min_value=0,
+            max_value=max_idx,
+            value=st.session_state.current_idx,
+            key="time_slider"
+        )
+        st.session_state.current_idx = curr_idx
+    else:
+        # アニメーション中はスライダーを無効化してちらつきを防ぐ
+        st.sidebar.slider(
+            "時刻インデックス",
+            min_value=0,
+            max_value=max_idx,
+            value=st.session_state.current_idx,
+            disabled=True,
+            key="time_slider_disabled"
+        )
     
     # 現在時刻の表示
     current_time = data['time'].iloc[curr_idx]
@@ -435,15 +446,18 @@ def main():
     time_fig = create_time_series(data['time'], x, data['freq'], curr_idx)
     st.plotly_chart(time_fig, use_container_width=True)
     
-    # アニメーション処理
-    if st.session_state.animation_running:
-        if st.session_state.current_idx < max_idx:
-            time.sleep(0.1)  # アニメーション速度調整
-            st.session_state.current_idx = min(max_idx, 
-                                             st.session_state.current_idx + speed)
-            st.rerun()
-        else:
-            st.session_state.animation_running = False
+    # アニメーション処理（改良版：ちらつき最小化）
+    if st.session_state.animation_running and st.session_state.current_idx < max_idx:
+        # 次のフレームを準備
+        st.session_state.current_idx = min(max_idx, st.session_state.current_idx + speed)
+        # 更新頻度を調整（高速時は間隔を短く、低速時は長く）
+        sleep_time = max(0.05, 0.2 / max(speed, 1))
+        time.sleep(sleep_time)
+        st.rerun()
+    elif st.session_state.animation_running and st.session_state.current_idx >= max_idx:
+        # アニメーション終了
+        st.session_state.animation_running = False
+        st.rerun()
     
     # データ情報表示
     st.sidebar.markdown("---")
