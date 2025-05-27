@@ -16,6 +16,10 @@ def load_data_from_files(freq_file, phase_file):
         data_f = pd.read_csv(freq_file)
         data_p = pd.read_csv(phase_file)
         
+        # 欠損値を0で補完
+        data_f = data_f.fillna(0)
+        data_p = data_p.fillna(0)
+        
         # 時刻データの処理
         time_f = pd.to_datetime(data_f.iloc[:, 0], errors='coerce')
         time_p = pd.to_datetime(data_p.iloc[:, 0], errors='coerce')
@@ -28,6 +32,19 @@ def load_data_from_files(freq_file, phase_file):
         phase_ref = data_p.iloc[:N, 2].values     # 3列目（基準カラム）
         freq = data_f.iloc[:N, 1].values          # 2列目（対象カラム）
         t = time_p[:N]
+        
+        # NaNが残っている場合は0で補完
+        phase_target = np.nan_to_num(phase_target, nan=0.0)
+        phase_ref = np.nan_to_num(phase_ref, nan=0.0)
+        freq = np.nan_to_num(freq, nan=50.0)  # 周波数のデフォルトは50Hz
+        
+        # データ品質情報をログ出力
+        missing_phase_target = np.sum(data_p.iloc[:N, 1].isna())
+        missing_phase_ref = np.sum(data_p.iloc[:N, 2].isna())
+        missing_freq = np.sum(data_f.iloc[:N, 1].isna())
+        
+        if missing_phase_target > 0 or missing_phase_ref > 0 or missing_freq > 0:
+            st.info(f"欠損値を0で補完しました: 対象位相={missing_phase_target}個, 基準位相={missing_phase_ref}個, 周波数={missing_freq}個")
         
         return {
             'phase_target': phase_target,
@@ -59,6 +76,10 @@ def load_data():
         data_f = pd.read_csv(freq_file)
         data_p = pd.read_csv(phase_file)
         
+        # 欠損値を0で補完
+        data_f = data_f.fillna(0)
+        data_p = data_p.fillna(0)
+        
         # 時刻データの処理
         time_f = pd.to_datetime(data_f.iloc[:, 0], errors='coerce')
         time_p = pd.to_datetime(data_p.iloc[:, 0], errors='coerce')
@@ -71,6 +92,11 @@ def load_data():
         phase_ref = data_p.iloc[:N, 2].values     # 3列目（基準カラム）
         freq = data_f.iloc[:N, 1].values          # 2列目（対象カラム）
         t = time_p[:N]
+        
+        # NaNが残っている場合は0で補完
+        phase_target = np.nan_to_num(phase_target, nan=0.0)
+        phase_ref = np.nan_to_num(phase_ref, nan=0.0)
+        freq = np.nan_to_num(freq, nan=50.0)  # 周波数のデフォルトは50Hz
         
         return {
             'phase_target': phase_target,
@@ -86,9 +112,20 @@ def load_data():
 
 def process_data(data, theta0):
     """データを処理する"""
+    # データに欠損値がないことを確認（念のため再チェック）
+    phase_target = np.nan_to_num(data['phase_target'], nan=0.0)
+    phase_ref = np.nan_to_num(data['phase_ref'], nan=0.0)
+    freq = np.nan_to_num(data['freq'], nan=50.0)
+    
     # 連続位相角の計算（unwrap相当）
-    phase_target_cont = np.degrees(np.unwrap(np.radians(data['phase_target'])))
-    phase_ref_cont = np.degrees(np.unwrap(np.radians(data['phase_ref'])))
+    # 0値が多い場合のunwrap処理を安全に実行
+    try:
+        phase_target_cont = np.degrees(np.unwrap(np.radians(phase_target)))
+        phase_ref_cont = np.degrees(np.unwrap(np.radians(phase_ref)))
+    except:
+        # unwrapが失敗した場合はそのまま使用
+        phase_target_cont = phase_target
+        phase_ref_cont = phase_ref
     
     # 位相差の計算
     phase_diff = phase_target_cont - phase_ref_cont
@@ -96,7 +133,12 @@ def process_data(data, theta0):
     # 基準角度でのwrap処理
     x = ((phase_diff + theta0 + 180) % 360) - 180
     theta_plot = np.radians(x)
-    y = 2 * np.pi * data['freq']
+    y = 2 * np.pi * freq
+    
+    # 無限大や異常値をチェック
+    x = np.nan_to_num(x, nan=0.0, posinf=180.0, neginf=-180.0)
+    theta_plot = np.nan_to_num(theta_plot, nan=0.0)
+    y = np.nan_to_num(y, nan=2*np.pi*50.0)  # デフォルト50Hz
     
     return x, theta_plot, y, phase_diff
 
@@ -469,6 +511,19 @@ def main():
         st.sidebar.write(f"周波数ファイル: {filenames[0]}")
         st.sidebar.write(f"位相ファイル: {filenames[1]}")
     
+    # データ品質情報
+    st.sidebar.markdown("### データ品質")
+    phase_target_zeros = np.sum(data['phase_target'] == 0)
+    phase_ref_zeros = np.sum(data['phase_ref'] == 0)
+    freq_zeros = np.sum(data['freq'] == 50.0)  # デフォルト値
+    
+    if phase_target_zeros > 0:
+        st.sidebar.write(f"対象位相の0値: {phase_target_zeros}個")
+    if phase_ref_zeros > 0:
+        st.sidebar.write(f"基準位相の0値: {phase_ref_zeros}個")
+    if freq_zeros > 0:
+        st.sidebar.write(f"周波数のデフォルト値: {freq_zeros}個")
+    
     # ファイルフォーマット説明
     st.sidebar.markdown("---")
     st.sidebar.markdown("### ファイルフォーマット")
@@ -481,6 +536,10 @@ def main():
     - 1列目: 時刻  
     - 2列目: 対象位相角
     - 3列目: 基準位相角
+    
+    **欠損値処理**
+    - 位相角: 0°で補完
+    - 周波数: 50Hzで補完
     """)
 
 if __name__ == "__main__":
