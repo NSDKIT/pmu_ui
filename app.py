@@ -4,8 +4,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import glob
 import os
-from matplotlib.gridspec import GridSpec
 import time
+from matplotlib.gridspec import GridSpec
 
 # 日本語フォント設定
 try:
@@ -39,7 +39,7 @@ def load_data(freq_file=None, phase_file=None):
     return freq_df.iloc[:N], phase_df.iloc[:N]
 
 def process_data(freq_df, phase_df, sampling=10):
-    """データ処理"""
+    """データ処理 - tkinterコードと同じロジック"""
     N = min(len(freq_df), len(phase_df))
     idx_target = 1
     idx_ref = 2
@@ -51,7 +51,7 @@ def process_data(freq_df, phase_df, sampling=10):
     phase_target = phase_df.iloc[:, idx_target].values
     phase_ref = phase_df.iloc[:, idx_ref].values
     
-    # 位相の連続化
+    # 位相の連続化（tkinterと同じ処理）
     phase_target_cont = np.unwrap(np.deg2rad(phase_target)) * 180/np.pi
     phase_ref_cont = np.unwrap(np.deg2rad(phase_ref)) * 180/np.pi
     phase_diff = phase_target_cont - phase_ref_cont
@@ -72,189 +72,188 @@ def process_data(freq_df, phase_df, sampling=10):
         'phase_diff_s': phase_diff_s
     }
 
-def get_processed_phase(phase_diff, theta0):
-    """θ₀基準の位相計算"""
-    x = np.mod(phase_diff + theta0 + 180, 360) - 180
-    theta = np.deg2rad(x)
-    return x, theta
-
-def get_power_curve(phase_diff, theta0, E=1.0, V=1.0, X=0.3):
-    """Power Angle Curve計算"""
-    delta = np.mod(phase_diff + theta0 + 180, 360) - 180
-    delta_rad = np.deg2rad(delta)
-    P = (E*V/X)*np.sin(delta_rad)
-    return delta, P
-
-def create_plots(data, curr_idx, theta0):
-    """プロット作成（確実に更新されるように改良）"""
-    x, theta = get_processed_phase(data['phase_diff'], theta0)
-    xs, _ = get_processed_phase(data['phase_diff_s'], theta0)
-    y = 2*np.pi*data['freq']
-    r = np.ones(data['N'])
+class PMUVisualization:
+    """tkinterクラスと同じ構造でStreamlit用に再設計"""
     
-    # 新しい図を毎回作成
-    plt.ioff()  # インタラクティブモードを無効化
-    fig = plt.figure(figsize=(15, 8))
-    fig.clear()  # 図をクリア
-    gs = GridSpec(2, 3, figure=fig)
+    def __init__(self, data):
+        self.data = data
+        self.E = 1.0
+        self.V = 1.0
+        self.X = 0.3
     
-    # 左上：円グラフ
-    ax_polar1 = fig.add_subplot(gs[0,0], polar=True)
-    ax_polar1.set_rlim(0, 1.1)
-    ax_polar1.plot([theta[curr_idx]], [r[curr_idx]], 'o', markersize=10, color='tab:blue')
-    ax_polar1.set_title(f'θ₀基準 相対位相[deg] 円グラフ\n時刻: {data["t"].iloc[curr_idx]}', fontsize=10)
+    def get_x_theta_r_y(self, theta0):
+        """tkinterのget_x_theta_r_yと同じ"""
+        x = np.mod(self.data['phase_diff'] + theta0 + 180, 360) - 180
+        theta = np.deg2rad(x)
+        y = 2*np.pi*self.data['freq']
+        r = np.ones(self.data['N'])
+        return x, theta, r, y
     
-    # 中央上：xy散布図
-    ax_xy = fig.add_subplot(gs[0,1])
-    ax_xy.plot(xs, data['freq_s']*2*np.pi, '.', color='tab:blue', alpha=0.2, markersize=4, label='全区間')
-    ax_xy.plot(x[:curr_idx+1], y[:curr_idx+1], '.', color='tab:orange', markersize=8, label='履歴')
-    ax_xy.plot([x[curr_idx]], [y[curr_idx]], 'r.', markersize=12, label='現在')
-    ax_xy.set_xlabel('θ₀基準相対位相[deg]')
-    ax_xy.set_ylabel('周波数[rad/s]')
-    ax_xy.set_xlim(-180, 180)
-    ax_xy.set_title('θ₀基準: 位相×freq 散布図')
-    ax_xy.legend(loc='lower right')
+    def get_xs(self, theta0):
+        """tkinterのget_xsと同じ"""
+        xs = np.mod(self.data['phase_diff_s'] + theta0 + 180, 360) - 180
+        return xs
     
-    # 右上：極座標
-    ax_polar2 = fig.add_subplot(gs[0,2], polar=True)
-    ax_polar2.set_rlim(np.nanmin(data['freq']), np.nanmax(data['freq'])*1.05)
-    ax_polar2.plot([theta[curr_idx]], [data['freq'][curr_idx]], 'o', markersize=10, color='tab:red')
-    ax_polar2.set_title('極座標: θ₀基準位相 × 周波数')
+    def get_power_curve(self, theta0):
+        """tkinterのget_power_curveと同じ"""
+        delta = np.mod(self.data['phase_diff'] + theta0 + 180, 360) - 180
+        delta_rad = np.deg2rad(delta)
+        P = (self.E*self.V/self.X)*np.sin(delta_rad)
+        return delta, P
     
-    # 下段左：時系列
-    ax_time = fig.add_subplot(gs[1,:2])
-    ax_time2 = ax_time.twinx()
-    
-    # 位相プロット
-    ax_time.plot(data['t_s'], xs, color='tab:blue', alpha=0.2, linestyle='-', label='θ₀基準相対位相[deg] 全体')
-    ax_time.plot(data['t'][:curr_idx+1], x[:curr_idx+1], color='tab:blue', linestyle='-', marker='.', markersize=3, label='θ₀基準相対位相[deg] 履歴')
-    ax_time.plot([data['t'][curr_idx]], [x[curr_idx]], 'o', color='tab:blue')
-    ax_time.set_ylabel('θ₀基準相対位相[deg]')
-    ax_time.set_ylim(-180, 180)
-    ax_time.set_xlabel('時刻')
-    ax_time.set_xlim(data['t'].iloc[0], data['t'].iloc[-1])
-    
-    # 周波数プロット
-    ax_time2.plot(data['t_s'], data['freq_s'], color='tab:red', alpha=0.2, label='周波数[Hz] 全体')
-    ax_time2.plot(data['t'][:curr_idx+1], data['freq'][:curr_idx+1], color='tab:red', linestyle='-', marker='.', markersize=3, label='周波数[Hz] 履歴')
-    ax_time2.plot([data['t'][curr_idx]], [data['freq'][curr_idx]], 's', color='tab:red')
-    ax_time2.set_ylabel('周波数[Hz]')
-    ax_time2.set_ylim(np.nanmin(data['freq'])-0.2, np.nanmax(data['freq'])+0.2)
-    
-    ax_time.set_title(f"時系列（θ₀基準相対位相＋周波数）\nカレント: {data['t'].iloc[curr_idx]}", fontsize=10)
-    
-    lines1, labels1 = ax_time.get_legend_handles_labels()
-    lines2, labels2 = ax_time2.get_legend_handles_labels()
-    ax_time.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
-    
-    # 下段右：Power Angle Curve
-    ax_power = fig.add_subplot(gs[1,2])
-    delta_curve = np.linspace(-180, 180, 1000)
-    P_curve = (1.0*1.0/0.3)*np.sin(np.deg2rad(delta_curve))
-    ax_power.plot(delta_curve, P_curve, '--', color='gray', linewidth=1)
-    
-    delta, P = get_power_curve(data['phase_diff'], theta0)
-    ax_power.plot(delta[:curr_idx+1], P[:curr_idx+1], '.', color='tab:blue', markersize=8)
-    ax_power.plot([delta[curr_idx]], [P[curr_idx]], 'r.', markersize=12)
-    ax_power.set_xlabel('θ₀基準 相差角 δ [deg]')
-    ax_power.set_ylabel('電力P [pu]')
-    ax_power.set_xlim(-180, 180)
-    ax_power.set_ylim(P_curve.min()-0.2, P_curve.max()+0.2)
-    ax_power.set_title('Power Angle Curve: P=(EV/X)sin(δ)')
-    
-    plt.tight_layout()
-    
-    # 図が確実に更新されるように現在の状態を記録
-    fig.suptitle(f'PMU Analysis - Index: {curr_idx} / Time: {data["t"].iloc[curr_idx]}', fontsize=8, y=0.98)
-    
-    return fig
+    def create_plots(self, curr_idx, theta0):
+        """tkinterのinit_plot_objects + update_plotsを統合"""
+        x, theta, r, y = self.get_x_theta_r_y(theta0)
+        xs = self.get_xs(theta0)
+        idx = curr_idx
+        
+        # 新しい図を作成
+        fig = plt.figure(figsize=(15, 8))
+        gs = fig.add_gridspec(2, 3)
+        
+        # --- 左上：円グラフ ---
+        ax_polar1 = fig.add_subplot(gs[0,0], polar=True)
+        ax_polar1.set_rlim(0, 1.1)
+        ax_polar1.plot([theta[idx]], [r[idx]], 'o', markersize=10, color='tab:blue')
+        ax_polar1.set_title(f'θ₀基準 相対位相[deg] 円グラフ\n時刻: {self.data["t"].iloc[idx]}', fontsize=10)
+        
+        # --- 中央上：xy散布図 ---
+        ax_xy = fig.add_subplot(gs[0,1])
+        ax_xy.plot(xs, self.data['freq_s']*2*np.pi, '.', color='tab:blue', alpha=0.2, markersize=4, label='全区間')
+        ax_xy.plot(x[:idx+1], y[:idx+1], '.', color='tab:orange', markersize=8, label='履歴')
+        ax_xy.plot([x[idx]], [y[idx]], 'r.', markersize=12, label='現在')
+        ax_xy.set_xlabel('θ₀基準相対位相[deg]')
+        ax_xy.set_ylabel('周波数[rad/s]')
+        ax_xy.set_xlim(-180, 180)
+        ax_xy.set_title('θ₀基準: 位相×freq 散布図')
+        ax_xy.legend(loc='lower right')
+        
+        # --- 右上：極座標 ---
+        ax_polar2 = fig.add_subplot(gs[0,2], polar=True)
+        ax_polar2.set_rlim(np.nanmin(self.data['freq']), np.nanmax(self.data['freq'])*1.05)
+        ax_polar2.plot([theta[idx]], [self.data['freq'][idx]], 'o', markersize=10, color='tab:red')
+        ax_polar2.set_title('極座標: θ₀基準位相 × 周波数')
+        
+        # --- 下段左：時系列（2軸プロット） ---
+        ax_time = fig.add_subplot(gs[1,:2])
+        ax_time2 = ax_time.twinx()
+        
+        # 位相プロット
+        ax_time.plot(self.data['t_s'], xs, color='tab:blue', alpha=0.2, linestyle='-', label='θ₀基準相対位相[deg] 全体(間引)')
+        ax_time.plot(self.data['t'][:idx+1], x[:idx+1], color='tab:blue', linestyle='-', marker='.', markersize=3, label='θ₀基準相対位相[deg] 履歴')
+        ax_time.plot([self.data['t'][idx]], [x[idx]], 'o', color='tab:blue')
+        ax_time.set_ylabel('θ₀基準相対位相[deg]')
+        ax_time.set_ylim(-180, 180)
+        ax_time.set_xlabel('時刻')
+        ax_time.set_xlim(self.data['t'].iloc[0], self.data['t'].iloc[-1])
+        
+        # 周波数プロット
+        ax_time2.plot(self.data['t_s'], self.data['freq_s'], color='tab:red', alpha=0.2, label='周波数[Hz] 全体(間引)')
+        ax_time2.plot(self.data['t'][:idx+1], self.data['freq'][:idx+1], color='tab:red', linestyle='-', marker='.', markersize=3, label='周波数[Hz] 履歴')
+        ax_time2.plot([self.data['t'][idx]], [self.data['freq'][idx]], 's', color='tab:red')
+        ax_time2.set_ylabel('周波数[Hz]')
+        ax_time2.set_ylim(np.nanmin(self.data['freq'])-0.2, np.nanmax(self.data['freq'])+0.2)
+        
+        ax_time.set_title(f"時系列（θ₀基準相対位相＋周波数）\nカレント: {self.data['t'].iloc[idx]}", fontsize=10)
+        
+        # 凡例統合
+        lines1, labels1 = ax_time.get_legend_handles_labels()
+        lines2, labels2 = ax_time2.get_legend_handles_labels()
+        ax_time.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
+        
+        # --- 下段右：Power Angle Curve ---
+        ax_power = fig.add_subplot(gs[1,2])
+        delta_curve = np.linspace(-180, 180, 1000)
+        P_curve = (self.E*self.V/self.X)*np.sin(np.deg2rad(delta_curve))
+        ax_power.plot(delta_curve, P_curve, '--', color='gray', linewidth=1)
+        
+        delta, P = self.get_power_curve(theta0)
+        ax_power.plot(delta[:idx+1], P[:idx+1], '.', color='tab:blue', markersize=8)
+        ax_power.plot([delta[idx]], [P[idx]], 'r.', markersize=12)
+        ax_power.set_xlabel('θ₀基準 相差角 δ [deg]')
+        ax_power.set_ylabel('電力P [pu]')
+        ax_power.set_xlim(-180, 180)
+        ax_power.set_ylim(P_curve.min()-0.2, P_curve.max()+0.2)
+        ax_power.set_title('Power Angle Curve: P=(EV/X)sin(δ)')
+        
+        plt.tight_layout()
+        return fig
 
 def main():
     st.set_page_config(page_title="PMU相対位相アニメUI", layout="wide")
     st.title("PMU相対位相アニメUI")
     
-    # サイドバー設定
-    st.sidebar.header("設定")
+    # セッション状態の初期化
+    if 'curr_idx' not in st.session_state:
+        st.session_state.curr_idx = 0
+    if 'auto_play' not in st.session_state:
+        st.session_state.auto_play = False
     
-    # データ読み込み
     try:
+        # データ読み込み
         if 'data' not in st.session_state:
             freq_df, phase_df = load_data()
             st.session_state.data = process_data(freq_df, phase_df)
-            st.session_state.curr_idx = 0
+            st.session_state.visualization = PMUVisualization(st.session_state.data)
         
         data = st.session_state.data
-        
-        # 自動再生状態を最初に取得
-        auto_play = st.session_state.get('auto_play', False)
+        viz = st.session_state.visualization
         
         # 制御パネル
-        col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 2, 1])
+        col1, col2, col3, col4, col5, col6 = st.columns([1, 1, 1, 1, 2, 1])
         
         with col1:
-            if st.button("▶️ Start"):
+            if st.button("▶️ Start", key="start_btn"):
                 st.session_state.auto_play = True
-                st.rerun()
         
         with col2:
-            if st.button("⏹️ Stop"):
+            if st.button("⏹️ Stop", key="stop_btn"):
                 st.session_state.auto_play = False
-                st.rerun()
         
         with col3:
-            speed = st.selectbox("再生速度", options=[1, 2, 5, 10, 20, 50, 100], index=3)
+            if st.button("🔄 Reset", key="reset_btn"):
+                st.session_state.curr_idx = 0
+                st.session_state.auto_play = False
         
         with col4:
-            # 自動再生中はスライダーを無効化
-            if auto_play:
-                st.slider("時間位置", 0, data['N']-1, st.session_state.curr_idx, disabled=True)
-            else:
-                curr_idx = st.slider("時間位置", 0, data['N']-1, st.session_state.curr_idx)
-                st.session_state.curr_idx = curr_idx
+            speed = st.selectbox("再生速度", options=[1, 2, 5, 10, 20, 50, 100], index=3, key="speed_select")
         
         with col5:
-            theta0 = st.selectbox("基準θ₀[deg]", options=list(range(0, 45, 5)), index=6)
+            # 自動再生中でなければスライダーを表示
+            if not st.session_state.auto_play:
+                curr_idx = st.slider("時間位置", 0, data['N']-1, st.session_state.curr_idx, key="time_slider")
+                st.session_state.curr_idx = curr_idx
+            else:
+                st.slider("時間位置", 0, data['N']-1, st.session_state.curr_idx, disabled=True, key="time_slider_disabled")
         
-        # 自動再生状態の表示
+        with col6:
+            theta0 = st.selectbox("基準θ₀[deg]", options=list(range(0, 45, 5)), index=6, key="theta0_select")
+        
+        # 状態表示
         status_col1, status_col2 = st.columns([3, 1])
         with status_col1:
-            if auto_play:
+            if st.session_state.auto_play:
                 st.success("🔄 自動再生中...")
             else:
                 st.info("⏸️ 停止中")
         
-        with status_col2:
-            if st.button("🔄 リセット"):
-                st.session_state.curr_idx = 0
-                st.rerun()
-        
-        # 自動再生の実行（より確実な更新のため）
-        if auto_play and st.session_state.curr_idx < data['N'] - 1:
-            # インデックスを進める
-            old_idx = st.session_state.curr_idx
-            st.session_state.curr_idx = min(st.session_state.curr_idx + speed, data['N'] - 1)
-            
-            # インデックスが実際に変更された場合のみ再実行
-            if st.session_state.curr_idx != old_idx:
-                time.sleep(0.1)  # 少し待機
-                st.rerun()
-        elif auto_play and st.session_state.curr_idx >= data['N'] - 1:
-            # 終了時の処理
-            st.session_state.auto_play = False
-            st.success("✅ アニメーション完了！")
-        
-        # 手動更新ボタンも追加（テスト用）
-        col_manual1, col_manual2 = st.columns([1, 4])
-        with col_manual1:
-            if st.button("🔄 手動更新"):
-                # 強制的にセッション状態を更新
-                st.session_state.force_update = not st.session_state.get('force_update', False)
-                st.rerun()
-        
-        # プロット作成・表示（シンプルな方法）
-        fig = create_plots(data, st.session_state.curr_idx, theta0)
+        # プロット作成・表示
+        fig = viz.create_plots(st.session_state.curr_idx, theta0)
         st.pyplot(fig)
-        plt.close(fig)  # メモリリーク防止
+        plt.close(fig)
+        
+        # 自動再生の実行
+        if st.session_state.auto_play:
+            if st.session_state.curr_idx < data['N'] - 1:
+                # インデックスを進める
+                st.session_state.curr_idx = min(st.session_state.curr_idx + speed, data['N'] - 1)
+                time.sleep(0.1)
+                st.rerun()
+            else:
+                # 終了時の処理
+                st.session_state.auto_play = False
+                st.success("✅ アニメーション完了！")
+                st.rerun()
         
         # 情報表示
         st.subheader("現在の情報")
@@ -268,19 +267,12 @@ def main():
             st.metric("周波数 [Hz]", f"{current_freq:.3f}")
         
         with col3:
-            x, _ = get_processed_phase(data['phase_diff'], theta0)
+            x, _, _, _ = viz.get_x_theta_r_y(theta0)
             current_phase = x[st.session_state.curr_idx]
             st.metric("θ₀基準相対位相 [deg]", f"{current_phase:.1f}")
         
         with col4:
             st.metric("インデックス", f"{st.session_state.curr_idx}/{data['N']-1}")
-        
-        # デバッグ情報（開発時のみ表示）
-        if st.checkbox("デバッグ情報を表示"):
-            st.write(f"自動再生状態: {auto_play}")
-            st.write(f"現在のインデックス: {st.session_state.curr_idx}")
-            st.write(f"総データ数: {data['N']}")
-            st.write(f"再生速度: {speed}")
         
     except FileNotFoundError as e:
         st.error(f"CSVファイルが見つかりません: {e}")
@@ -302,6 +294,7 @@ def main():
             if st.button("データを再読み込み"):
                 if 'data' in st.session_state:
                     del st.session_state.data
+                    del st.session_state.visualization
                 st.rerun()
 
 if __name__ == "__main__":
