@@ -194,6 +194,8 @@ def main():
         if 'data' not in st.session_state:
             freq_df, phase_df = load_data()
             st.session_state.data = process_data(freq_df, phase_df)
+        
+        if 'visualization' not in st.session_state:
             st.session_state.visualization = PMUVisualization(st.session_state.data)
         
         data = st.session_state.data
@@ -292,9 +294,10 @@ def main():
             
             st.success("ファイルがアップロードされました。ページを再読み込みしてください。")
             if st.button("データを再読み込み"):
-                if 'data' in st.session_state:
-                    del st.session_state.data
-                    del st.session_state.visualization
+                # セッション状態をクリア
+                for key in ['data', 'visualization', 'curr_idx', 'auto_play']:
+                    if key in st.session_state:
+                        del st.session_state[key]
                 st.rerun()
 
 if __name__ == "__main__":
