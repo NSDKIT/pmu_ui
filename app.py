@@ -1,613 +1,250 @@
 import streamlit as st
-import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
-import plotly.express as px
-from plotly.subplots import make_subplots
+import pandas as pd
+import matplotlib.pyplot as plt
 import glob
 import os
-from datetime import datetime
+from matplotlib.gridspec import GridSpec
 import time
 
-def load_data_from_files(freq_file, phase_file):
-    """アップロードされたCSVファイルを読み込む"""
-    try:
-        # データ読み込み
-        data_f = pd.read_csv(freq_file)
-        data_p = pd.read_csv(phase_file)
-        
-        # 時刻データの処理
-        time_f = pd.to_datetime(data_f.iloc[:, 0], errors='coerce')
-        time_p = pd.to_datetime(data_p.iloc[:, 0], errors='coerce')
-        
-        # データの長さを合わせる
-        N = min(len(data_p), len(data_f))
-        
-        # 必要なデータを抽出
-        phase_target = data_p.iloc[:N, 1].values  # 2列目（対象カラム）
-        phase_ref = data_p.iloc[:N, 2].values     # 3列目（基準カラム）
-        freq = data_f.iloc[:N, 1].values          # 2列目（対象カラム）
-        t = time_p[:N]
-        
-        # 有効データのマスクを作成（NaNまたは空文字でないデータ）
-        valid_mask_p = ~(pd.isna(phase_target) | pd.isna(phase_ref) | 
-                        (phase_target == '') | (phase_ref == ''))
-        valid_mask_f = ~(pd.isna(freq) | (freq == ''))
-        valid_mask = valid_mask_p & valid_mask_f
-        
-        # 有効データのみを抽出
-        phase_target_clean = phase_target[valid_mask]
-        phase_ref_clean = phase_ref[valid_mask]
-        freq_clean = freq[valid_mask]
-        t_clean = t[valid_mask]
-        
-        # データ品質情報をログ出力
-        skipped_count = N - len(phase_target_clean)
-        if skipped_count > 0:
-            st.info(f"欠損データをスキップしました: {skipped_count}個のデータポイント（全体の{skipped_count/N*100:.1f}%）")
-        
-        # 有効なデータが少なすぎる場合の警告
-        if len(phase_target_clean) < 10:
-            st.warning(f"有効なデータが少なすぎます: {len(phase_target_clean)}個")
-        
-        return {
-            'phase_target': phase_target_clean,
-            'phase_ref': phase_ref_clean,
-            'freq': freq_clean,
-            'time': t_clean,
-            'N': len(phase_target_clean),
-            'original_N': N,
-            'skipped_count': skipped_count
-        }
-        
-    except Exception as e:
-        st.error(f'ファイル読み込みエラー: {str(e)}')
-        return None
+# 日本語フォント設定
+plt.rcParams['font.family'] = 'DejaVu Sans'
 
-def load_data():
-    """ローカルディレクトリからCSVファイルを検索して読み込む（バックアップ機能）"""
-    # f_*.csvファイルを検索
-    freq_files = glob.glob('f_*.csv')
-    phase_files = glob.glob('p_*.csv')
-    
-    if not freq_files or not phase_files:
-        return None, (None, None)
-    
-    # 最初のファイルを使用
-    freq_file = freq_files[0]
-    phase_file = phase_files[0]
-    
-    try:
-        # データ読み込み
-        data_f = pd.read_csv(freq_file)
-        data_p = pd.read_csv(phase_file)
-        
-        # 時刻データの処理
-        time_f = pd.to_datetime(data_f.iloc[:, 0], errors='coerce')
-        time_p = pd.to_datetime(data_p.iloc[:, 0], errors='coerce')
-        
-        # データの長さを合わせる
-        N = min(len(data_p), len(data_f))
-        
-        # 必要なデータを抽出
-        phase_target = data_p.iloc[:N, 1].values  # 2列目（対象カラム）
-        phase_ref = data_p.iloc[:N, 2].values     # 3列目（基準カラム）
-        freq = data_f.iloc[:N, 1].values          # 2列目（対象カラム）
-        t = time_p[:N]
-        
-        # 有効データのマスクを作成（NaNまたは空文字でないデータ）
-        valid_mask_p = ~(pd.isna(phase_target) | pd.isna(phase_ref) | 
-                        (phase_target == '') | (phase_ref == ''))
-        valid_mask_f = ~(pd.isna(freq) | (freq == ''))
-        valid_mask = valid_mask_p & valid_mask_f
-        
-        # 有効データのみを抽出
-        phase_target_clean = phase_target[valid_mask]
-        phase_ref_clean = phase_ref[valid_mask]
-        freq_clean = freq[valid_mask]
-        t_clean = t[valid_mask]
-        
-        # データ品質情報
-        skipped_count = N - len(phase_target_clean)
-        
-        return {
-            'phase_target': phase_target_clean,
-            'phase_ref': phase_ref_clean,
-            'freq': freq_clean,
-            'time': t_clean,
-            'N': len(phase_target_clean),
-            'original_N': N,
-            'skipped_count': skipped_count
-        }, (freq_file, phase_file)
-        
-    except Exception as e:
-        st.error(f'ファイル読み込みエラー: {str(e)}')
-        return None, (None, None)
+def auto_find_csv(prefix):
+    """CSVファイルを自動検索"""
+    files = sorted(glob.glob(f'{prefix}_*.csv'))
+    if not files:
+        raise FileNotFoundError(f'{prefix}_*.csv が見つかりません')
+    return files[0]
 
-def process_data(data, theta0):
-    """データを処理する"""
-    # データは既にクリーンアップ済みなので、そのまま使用
-    phase_target = data['phase_target']
-    phase_ref = data['phase_ref']
-    freq = data['freq']
+@st.cache_data
+def load_data(freq_file=None, phase_file=None):
+    """データ読み込み"""
+    if freq_file is None:
+        freq_file = auto_find_csv('f')
+    if phase_file is None:
+        phase_file = auto_find_csv('p')
     
-    # 連続位相角の計算（unwrap相当）
-    try:
-        phase_target_cont = np.degrees(np.unwrap(np.radians(phase_target)))
-        phase_ref_cont = np.degrees(np.unwrap(np.radians(phase_ref)))
-    except:
-        # unwrapが失敗した場合はそのまま使用
-        phase_target_cont = phase_target
-        phase_ref_cont = phase_ref
+    freq_df = pd.read_csv(freq_file, encoding='utf-8')
+    phase_df = pd.read_csv(phase_file, encoding='utf-8')
     
-    # 位相差の計算
+    N = min(len(freq_df), len(phase_df))
+    freq_df = freq_df.interpolate(method='linear', limit_direction='both')
+    phase_df = phase_df.interpolate(method='linear', limit_direction='both')
+    
+    return freq_df.iloc[:N], phase_df.iloc[:N]
+
+def process_data(freq_df, phase_df, sampling=10):
+    """データ処理"""
+    N = min(len(freq_df), len(phase_df))
+    idx_target = 1
+    idx_ref = 2
+    idx_freq = 1
+    
+    # データ処理
+    t = pd.to_datetime(phase_df.iloc[:,0])
+    freq = freq_df.iloc[:, idx_freq].values
+    phase_target = phase_df.iloc[:, idx_target].values
+    phase_ref = phase_df.iloc[:, idx_ref].values
+    
+    # 位相の連続化
+    phase_target_cont = np.unwrap(np.deg2rad(phase_target)) * 180/np.pi
+    phase_ref_cont = np.unwrap(np.deg2rad(phase_ref)) * 180/np.pi
     phase_diff = phase_target_cont - phase_ref_cont
     
-    # 基準角度でのwrap処理
-    x = ((phase_diff + theta0 + 180) % 360) - 180
-    theta_plot = np.radians(x)
-    y = 2 * np.pi * freq
+    # サンプリング
+    sample_idx = np.arange(0, N, sampling)
+    t_s = t.iloc[sample_idx]
+    freq_s = freq[sample_idx]
+    phase_diff_s = phase_diff[sample_idx]
     
-    return x, theta_plot, y, phase_diff
+    return {
+        'N': N,
+        't': t,
+        'freq': freq,
+        'phase_diff': phase_diff,
+        't_s': t_s,
+        'freq_s': freq_s,
+        'phase_diff_s': phase_diff_s
+    }
 
-def create_plots_with_placeholders(x, theta_plot, y, data, curr_idx):
-    """プロットを作成し、プレースホルダーを返す"""
-    
-    # 現在時刻
-    current_time = data['time'].iloc[curr_idx]
-    
-    # 1. 基準系位相角（極座標）
-    polar_fig1 = go.Figure()
-    polar_fig1.add_trace(go.Scatterpolar(
-        r=[1],
-        theta=[np.degrees(theta_plot[curr_idx])],
-        mode='markers',
-        marker=dict(size=15, color='red'),
-        name='現在位置'
-    ))
-    polar_fig1.update_layout(
-        polar=dict(
-            radialaxis=dict(range=[0, 1.1], visible=True),
-            angularaxis=dict(direction='clockwise', rotation=90)
-        ),
-        title=f"基準系での全位相wrap, 時刻: {current_time}",
-        height=300
-    )
-    
-    # 2. XY散布図
-    xy_fig = go.Figure()
-    xy_fig.add_trace(go.Scatter(
-        x=x[:curr_idx+1],
-        y=y[:curr_idx+1],
-        mode='markers',
-        marker=dict(size=8, color='blue', opacity=0.6),
-        name='履歴'
-    ))
-    xy_fig.add_trace(go.Scatter(
-        x=[x[curr_idx]],
-        y=[y[curr_idx]],
-        mode='markers',
-        marker=dict(size=15, color='red'),
-        name='現在位置'
-    ))
-    
-    if curr_idx > 0:
-        center_x = np.mean(x[:curr_idx+1])
-        center_y = np.mean(y[:curr_idx+1])
-        radius = np.std(x[:curr_idx+1])
-        theta_circle = np.linspace(0, 2*np.pi, 100)
-        circle_x = center_x + radius * np.cos(theta_circle)
-        circle_y = center_y + radius * np.sin(theta_circle)
-        xy_fig.add_trace(go.Scatter(
-            x=circle_x, y=circle_y, mode='lines',
-            line=dict(dash='dash', color='black'), name='標準偏差円'
-        ))
-    
-    xy_fig.update_layout(
-        title="基準系での相対位相 × freq [rad/s] 散布図",
-        xaxis_title='相対位相 [deg]（±180°wrap）',
-        yaxis_title='周波数 [rad/s]',
-        xaxis=dict(range=[-180, 180]),
-        height=300
-    )
-    
-    # 3. 極座標プロット（周波数）
-    polar_fig2 = go.Figure()
-    polar_fig2.add_trace(go.Scatterpolar(
-        r=data['freq'][:curr_idx+1],
-        theta=np.degrees(theta_plot[:curr_idx+1]),
-        mode='markers',
-        marker=dict(size=8, color='teal', opacity=0.6),
-        name='履歴'
-    ))
-    polar_fig2.add_trace(go.Scatterpolar(
-        r=[data['freq'][curr_idx]],
-        theta=[np.degrees(theta_plot[curr_idx])],
-        mode='markers',
-        marker=dict(size=15, color='red'),
-        name='現在位置'
-    ))
-    polar_fig2.update_layout(
-        polar=dict(
-            radialaxis=dict(range=[min(data['freq']), max(data['freq'])]),
-            angularaxis=dict(direction='clockwise', rotation=90)
-        ),
-        title='極座標: 周波数(半径) × 基準系位相角(角度)',
-        height=300
-    )
-    
-    # 4. Power Angle Curve
-    power_fig = create_power_angle_curve(x, curr_idx)
-    
-    # 5. 時系列プロット
-    time_fig = create_time_series(data['time'], x, data['freq'], curr_idx)
-    
-    return polar_fig1, xy_fig, polar_fig2, power_fig, time_fig
+def get_processed_phase(phase_diff, theta0):
+    """θ₀基準の位相計算"""
+    x = np.mod(phase_diff + theta0 + 180, 360) - 180
+    theta = np.deg2rad(x)
+    return x, theta
 
-def create_xy_scatter(x, y, curr_idx, title):
-    """XY散布図を作成（未使用になったため残しておく）"""
-    fig = go.Figure()
-    
-    # 履歴データ
-    fig.add_trace(go.Scatter(
-        x=x[:curr_idx+1],
-        y=y[:curr_idx+1],
-        mode='markers',
-        marker=dict(size=8, color='blue', opacity=0.6),
-        name='履歴'
-    ))
-    
-    # 現在の点
-    fig.add_trace(go.Scatter(
-        x=[x[curr_idx]],
-        y=[y[curr_idx]],
-        mode='markers',
-        marker=dict(size=15, color='red'),
-        name='現在位置'
-    ))
-    
-    # 円（標準偏差）
-    if curr_idx > 0:
-        center_x = np.mean(x[:curr_idx+1])
-        center_y = np.mean(y[:curr_idx+1])
-        radius = np.std(x[:curr_idx+1])
-        
-        theta_circle = np.linspace(0, 2*np.pi, 100)
-        circle_x = center_x + radius * np.cos(theta_circle)
-        circle_y = center_y + radius * np.sin(theta_circle)
-        
-        fig.add_trace(go.Scatter(
-            x=circle_x,
-            y=circle_y,
-            mode='lines',
-            line=dict(dash='dash', color='black'),
-            name='標準偏差円'
-        ))
-    
-    fig.update_layout(
-        title=title,
-        xaxis_title='相対位相 [deg]（±180°wrap）',
-        yaxis_title='周波数 [rad/s]',
-        xaxis=dict(range=[-180, 180]),
-        height=300
-    )
-    
-    return fig
+def get_power_curve(phase_diff, theta0, E=1.0, V=1.0, X=0.3):
+    """Power Angle Curve計算"""
+    delta = np.mod(phase_diff + theta0 + 180, 360) - 180
+    delta_rad = np.deg2rad(delta)
+    P = (E*V/X)*np.sin(delta_rad)
+    return delta, P
 
-def create_time_series(t, x, freq, curr_idx):
-    """時系列プロットを作成"""
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
+def create_plots(data, curr_idx, theta0):
+    """プロット作成"""
+    x, theta = get_processed_phase(data['phase_diff'], theta0)
+    xs, _ = get_processed_phase(data['phase_diff_s'], theta0)
+    y = 2*np.pi*data['freq']
+    r = np.ones(data['N'])
     
-    # 位相データ
-    fig.add_trace(
-        go.Scatter(x=t, y=x, mode='lines', name='相対位相角', 
-                  line=dict(color='blue')),
-        secondary_y=False,
-    )
+    fig = plt.figure(figsize=(15, 8))
+    gs = GridSpec(2, 3, figure=fig)
     
-    # 現在位置（位相）
-    fig.add_trace(
-        go.Scatter(x=[t.iloc[curr_idx]], y=[x[curr_idx]], 
-                  mode='markers', marker=dict(size=10, color='red'),
-                  name='現在位置（位相）'),
-        secondary_y=False,
-    )
+    # 左上：円グラフ
+    ax_polar1 = fig.add_subplot(gs[0,0], polar=True)
+    ax_polar1.set_rlim(0, 1.1)
+    ax_polar1.plot([theta[curr_idx]], [r[curr_idx]], 'o', markersize=10, color='tab:blue')
+    ax_polar1.set_title(f'θ₀基準 相対位相[deg] 円グラフ\\n時刻: {data["t"].iloc[curr_idx]}')
     
-    # 周波数データ
-    fig.add_trace(
-        go.Scatter(x=t, y=freq, mode='lines', name='周波数',
-                  line=dict(color='green')),
-        secondary_y=True,
-    )
+    # 中央上：xy散布図
+    ax_xy = fig.add_subplot(gs[0,1])
+    ax_xy.plot(xs, data['freq_s']*2*np.pi, '.', color='tab:blue', alpha=0.2, markersize=4, label='全区間')
+    ax_xy.plot(x[:curr_idx+1], y[:curr_idx+1], '.', color='tab:orange', markersize=8, label='履歴')
+    ax_xy.plot([x[curr_idx]], [y[curr_idx]], 'r.', markersize=12, label='現在')
+    ax_xy.set_xlabel('θ₀基準相対位相[deg]')
+    ax_xy.set_ylabel('周波数[rad/s]')
+    ax_xy.set_xlim(-180, 180)
+    ax_xy.set_title('θ₀基準: 位相×freq 散布図')
+    ax_xy.legend(loc='lower right')
     
-    # 現在位置（周波数）
-    fig.add_trace(
-        go.Scatter(x=[t.iloc[curr_idx]], y=[freq[curr_idx]], 
-                  mode='markers', marker=dict(size=10, color='orange', symbol='square'),
-                  name='現在位置（周波数）'),
-        secondary_y=True,
-    )
+    # 右上：極座標
+    ax_polar2 = fig.add_subplot(gs[0,2], polar=True)
+    ax_polar2.set_rlim(np.nanmin(data['freq']), np.nanmax(data['freq'])*1.05)
+    ax_polar2.plot([theta[curr_idx]], [data['freq'][curr_idx]], 'o', markersize=10, color='tab:red')
+    ax_polar2.set_title('極座標: θ₀基準位相 × 周波数')
     
-    fig.update_xaxes(title_text="時刻")
-    fig.update_yaxes(title_text="相対位相角 [deg]", secondary_y=False, range=[-180, 180])
-    fig.update_yaxes(title_text="周波数 [Hz]", secondary_y=True)
+    # 下段左：時系列
+    ax_time = fig.add_subplot(gs[1,:2])
+    ax_time2 = ax_time.twinx()
     
-    fig.update_layout(
-        title="時系列上の相対位相角と周波数",
-        height=400
-    )
+    # 位相プロット
+    ax_time.plot(data['t_s'], xs, color='tab:blue', alpha=0.2, linestyle='-', label='θ₀基準相対位相[deg] 全体')
+    ax_time.plot(data['t'][:curr_idx+1], x[:curr_idx+1], color='tab:blue', linestyle='-', marker='.', markersize=3, label='θ₀基準相対位相[deg] 履歴')
+    ax_time.plot([data['t'][curr_idx]], [x[curr_idx]], 'o', color='tab:blue')
+    ax_time.set_ylabel('θ₀基準相対位相[deg]')
+    ax_time.set_ylim(-180, 180)
+    ax_time.set_xlabel('時刻')
+    ax_time.set_xlim(data['t'].iloc[0], data['t'].iloc[-1])
     
-    return fig
-
-def create_power_angle_curve(x, curr_idx, E=1.0, V=1.0, X=0.3):
-    """Power Angle Curveを作成"""
-    fig = go.Figure()
+    # 周波数プロット
+    ax_time2.plot(data['t_s'], data['freq_s'], color='tab:red', alpha=0.2, label='周波数[Hz] 全体')
+    ax_time2.plot(data['t'][:curr_idx+1], data['freq'][:curr_idx+1], color='tab:red', linestyle='-', marker='.', markersize=3, label='周波数[Hz] 履歴')
+    ax_time2.plot([data['t'][curr_idx]], [data['freq'][curr_idx]], 's', color='tab:red')
+    ax_time2.set_ylabel('周波数[Hz]')
+    ax_time2.set_ylim(np.nanmin(data['freq'])-0.2, np.nanmax(data['freq'])+0.2)
     
-    # 理論曲線
+    ax_time.set_title(f"時系列（θ₀基準相対位相＋周波数）\\nカレント: {data['t'].iloc[curr_idx]}")
+    
+    lines1, labels1 = ax_time.get_legend_handles_labels()
+    lines2, labels2 = ax_time2.get_legend_handles_labels()
+    ax_time.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
+    
+    # 下段右：Power Angle Curve
+    ax_power = fig.add_subplot(gs[1,2])
     delta_curve = np.linspace(-180, 180, 1000)
-    P_curve = (E * V / X) * np.sin(np.radians(delta_curve))
+    P_curve = (1.0*1.0/0.3)*np.sin(np.deg2rad(delta_curve))
+    ax_power.plot(delta_curve, P_curve, '--', color='gray', linewidth=1)
     
-    fig.add_trace(go.Scatter(
-        x=delta_curve,
-        y=P_curve,
-        mode='lines',
-        line=dict(dash='dash', color='gray'),
-        name='理論曲線'
-    ))
+    delta, P = get_power_curve(data['phase_diff'], theta0)
+    ax_power.plot(delta[:curr_idx+1], P[:curr_idx+1], '.', color='tab:blue', markersize=8)
+    ax_power.plot([delta[curr_idx]], [P[curr_idx]], 'r.', markersize=12)
+    ax_power.set_xlabel('θ₀基準 相差角 δ [deg]')
+    ax_power.set_ylabel('電力P [pu]')
+    ax_power.set_xlim(-180, 180)
+    ax_power.set_ylim(P_curve.min()-0.2, P_curve.max()+0.2)
+    ax_power.set_title('Power Angle Curve: P=(EV/X)sin(δ)')
     
-    # 実データ
-    delta = x
-    P = (E * V / X) * np.sin(np.radians(delta))
-    
-    fig.add_trace(go.Scatter(
-        x=delta[:curr_idx+1],
-        y=P[:curr_idx+1],
-        mode='markers',
-        marker=dict(size=8, color='blue', opacity=0.6),
-        name='実測値'
-    ))
-    
-    # 現在の点
-    fig.add_trace(go.Scatter(
-        x=[delta[curr_idx]],
-        y=[P[curr_idx]],
-        mode='markers',
-        marker=dict(size=15, color='red'),
-        name='現在位置'
-    ))
-    
-    fig.update_layout(
-        title='Power Angle Curve: P=(EV/X)sin(δ)',
-        xaxis_title='相対位相角 δ [deg]（±180°wrap）',
-        yaxis_title='電力 P [pu]',
-        xaxis=dict(range=[-180, 180]),
-        height=300
-    )
-    
+    plt.tight_layout()
     return fig
 
 def main():
     st.set_page_config(page_title="PMU相対位相アニメUI", layout="wide")
+    st.title("PMU相対位相アニメUI")
     
-    st.title("PMU相対位相アニメーションUI")
-    st.markdown("---")
-    
-    # ファイルアップロード
-    st.markdown("### ファイルアップロード")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        freq_file = st.file_uploader(
-            "周波数データファイル (f_*.csv)",
-            type=['csv'],
-            help="1列目: 時刻, 2列目: 周波数データ"
-        )
-    
-    with col2:
-        phase_file = st.file_uploader(
-            "位相角データファイル (p_*.csv)",
-            type=['csv'],
-            help="1列目: 時刻, 2列目: 対象位相, 3列目: 基準位相"
-        )
+    # サイドバー設定
+    st.sidebar.header("設定")
     
     # データ読み込み
-    data = None
-    filenames = (None, None)
-    
-    if freq_file is not None and phase_file is not None:
-        # アップロードされたファイルから読み込み
-        data = load_data_from_files(freq_file, phase_file)
-        if data is not None:
-            filenames = (freq_file.name, phase_file.name)
-            st.success(f'ファイル読み込み成功: 周波数 = {freq_file.name}, 位相角 = {phase_file.name}')
-    else:
-        # ローカルファイルから読み込み（バックアップ）
-        if freq_file is None and phase_file is None:
-            st.info("ファイルをアップロードしてください。または、アプリと同じディレクトリにf_*.csvとp_*.csvファイルを配置してください。")
-            data, filenames = load_data()
-            if data is not None:
-                st.info(f'ローカルファイル使用: 周波数 = {filenames[0]}, 位相角 = {filenames[1]}')
-        elif freq_file is None:
-            st.warning("周波数データファイル (f_*.csv) をアップロードしてください")
-        elif phase_file is None:
-            st.warning("位相角データファイル (p_*.csv) をアップロードしてください")
-    
-    if data is None:
-        st.stop()
-    
-    st.markdown("---")
-    
-    # サイドバーのコントロール
-    st.sidebar.header("制御パネル")
-    
-    # 基準角度設定
-    theta0 = st.sidebar.selectbox(
-        "基準角度 [deg]:",
-        options=[0, 5, 10, 15, 20, 25, 30, 35, 40],
-        index=6  # デフォルト30
-    )
-    
-    # データ処理
-    x, theta_plot, y, phase_diff = process_data(data, theta0)
-    
-    # スライダーとアニメーション制御
-    max_idx = data['N'] - 1
-    
-    # セッション状態の初期化
-    if 'current_idx' not in st.session_state:
-        st.session_state.current_idx = 0
-    if 'animation_running' not in st.session_state:
-        st.session_state.animation_running = False
-    if 'plot_containers' not in st.session_state:
-        st.session_state.plot_containers = None
-    
-    # コントロールボタン
-    col1, col2, col3, col4 = st.sidebar.columns(4)
-    
-    with col1:
-        if st.button("▶️ Start"):
-            st.session_state.animation_running = True
-    
-    with col2:
-        if st.button("⏸️ Stop"):
-            st.session_state.animation_running = False
-    
-    with col3:
-        if st.button("⏮️ Reset"):
-            st.session_state.current_idx = 0
-            st.session_state.animation_running = False
-    
-    with col4:
-        if st.button("⏭️ End"):
-            st.session_state.current_idx = max_idx
-            st.session_state.animation_running = False
-    
-    # 再生速度設定
-    speed = st.sidebar.selectbox(
-        "再生速度:",
-        options=[1, 2, 5, 10, 20, 50, 100],
-        index=3  # デフォルト10
-    )
-    
-    # スライダー（アニメーション中は無効化）
-    if not st.session_state.animation_running:
-        curr_idx = st.sidebar.slider(
-            "時刻インデックス",
-            min_value=0,
-            max_value=max_idx,
-            value=st.session_state.current_idx,
-            key="time_slider"
-        )
-        st.session_state.current_idx = curr_idx
-    else:
-        # アニメーション中はスライダーを無効化してちらつきを防ぐ
-        st.sidebar.slider(
-            "時刻インデックス",
-            min_value=0,
-            max_value=max_idx,
-            value=st.session_state.current_idx,
-            disabled=True,
-            key="time_slider_disabled"
-        )
-    
-    # 現在のインデックスを取得
-    curr_idx = st.session_state.current_idx
-    
-    # 現在時刻の表示
-    current_time = data['time'].iloc[curr_idx]
-    st.sidebar.write(f"現在時刻: {current_time}")
-    
-    # メインプロット領域（プレースホルダーを使用してちらつき防止）
-    if st.session_state.plot_containers is None:
-        # 初回のみプレースホルダーを作成
-        col1, col2 = st.columns(2)
+    try:
+        if 'data' not in st.session_state:
+            freq_df, phase_df = load_data()
+            st.session_state.data = process_data(freq_df, phase_df)
+            st.session_state.curr_idx = 0
+        
+        data = st.session_state.data
+        
+        # 制御パネル
+        col1, col2, col3, col4 = st.columns([1, 1, 2, 1])
         
         with col1:
-            polar_placeholder1 = st.empty()
-            xy_placeholder = st.empty()
+            theta0 = st.selectbox("基準θ₀[deg]", options=list(range(0, 45, 5)), index=6)
         
         with col2:
-            polar_placeholder2 = st.empty()
-            power_placeholder = st.empty()
+            speed = st.selectbox("再生速度", options=[1, 2, 5, 10, 20, 50, 100], index=3)
         
-        # 時系列プロット用プレースホルダー
-        st.markdown("### 時系列データ")
-        time_placeholder = st.empty()
+        with col3:
+            curr_idx = st.slider("時間位置", 0, data['N']-1, st.session_state.curr_idx)
+            st.session_state.curr_idx = curr_idx
         
-        # プレースホルダーをセッション状態に保存
-        st.session_state.plot_containers = {
-            'polar1': polar_placeholder1,
-            'xy': xy_placeholder,
-            'polar2': polar_placeholder2,
-            'power': power_placeholder,
-            'time': time_placeholder
-        }
-    
-    # プロットを作成して既存のプレースホルダーに描画
-    polar_fig1, xy_fig, polar_fig2, power_fig, time_fig = create_plots_with_placeholders(
-        x, theta_plot, y, data, curr_idx
-    )
-    
-    # プレースホルダーに描画（再作成ではなく更新）
-    with st.session_state.plot_containers['polar1']:
-        st.plotly_chart(polar_fig1, use_container_width=True, key=f"polar1_{curr_idx}")
-    
-    with st.session_state.plot_containers['xy']:
-        st.plotly_chart(xy_fig, use_container_width=True, key=f"xy_{curr_idx}")
-    
-    with st.session_state.plot_containers['polar2']:
-        st.plotly_chart(polar_fig2, use_container_width=True, key=f"polar2_{curr_idx}")
-    
-    with st.session_state.plot_containers['power']:
-        st.plotly_chart(power_fig, use_container_width=True, key=f"power_{curr_idx}")
-    
-    with st.session_state.plot_containers['time']:
-        st.plotly_chart(time_fig, use_container_width=True, key=f"time_{curr_idx}")
-    
-    # アニメーション処理（ちらつき防止版）
-    if st.session_state.animation_running and st.session_state.current_idx < max_idx:
-        # バックグラウンドで次のフレームを準備
-        st.session_state.current_idx = min(max_idx, st.session_state.current_idx + speed)
-        # フレーム間隔を調整
-        sleep_time = max(0.02, 0.1 / max(speed, 1))
-        time.sleep(sleep_time)
-        # プロットの再描画を最小限に抑制
-        st.rerun()
-    elif st.session_state.animation_running and st.session_state.current_idx >= max_idx:
-        # アニメーション終了
-        st.session_state.animation_running = False
-    
-    # データ情報表示
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### データ情報")
-    st.sidebar.write(f"有効データ点数: {data['N']}")
-    if 'original_N' in data:
-        st.sidebar.write(f"元データ点数: {data['original_N']}")
-        if data['skipped_count'] > 0:
-            st.sidebar.write(f"スキップ数: {data['skipped_count']} ({data['skipped_count']/data['original_N']*100:.1f}%)")
-    
-    if filenames[0] and filenames[1]:
-        st.sidebar.write(f"周波数ファイル: {filenames[0]}")
-        st.sidebar.write(f"位相ファイル: {filenames[1]}")
-    
-    # ファイルフォーマット説明
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### ファイルフォーマット")
-    st.sidebar.markdown("""
-    **周波数ファイル (f_*.csv)**
-    - 1列目: 時刻
-    - 2列目: 周波数データ
-    
-    **位相ファイル (p_*.csv)**
-    - 1列目: 時刻  
-    - 2列目: 対象位相角
-    - 3列目: 基準位相角
-    
-    **欠損値処理**
-    - 空データ・NaN値はスキップ
-    - 有効なデータのみ使用
-    - 時系列の連続性は保持
-    """)
+        with col4:
+            auto_play = st.checkbox("自動再生")
+        
+        # 自動再生機能
+        if auto_play and 'last_update' not in st.session_state:
+            st.session_state.last_update = time.time()
+        
+        if auto_play:
+            current_time = time.time()
+            if current_time - st.session_state.get('last_update', 0) > 0.1:  # 100ms間隔
+                if st.session_state.curr_idx < data['N'] - 1:
+                    st.session_state.curr_idx = min(st.session_state.curr_idx + speed, data['N'] - 1)
+                    st.session_state.last_update = current_time
+                    st.rerun()
+                else:
+                    st.session_state.curr_idx = 0  # リセット
+        
+        # プロット作成・表示
+        fig = create_plots(data, st.session_state.curr_idx, theta0)
+        st.pyplot(fig)
+        
+        # 情報表示
+        st.subheader("現在の情報")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("現在時刻", str(data['t'].iloc[st.session_state.curr_idx]))
+        
+        with col2:
+            current_freq = data['freq'][st.session_state.curr_idx]
+            st.metric("周波数 [Hz]", f"{current_freq:.3f}")
+        
+        with col3:
+            x, _ = get_processed_phase(data['phase_diff'], theta0)
+            current_phase = x[st.session_state.curr_idx]
+            st.metric("θ₀基準相対位相 [deg]", f"{current_phase:.1f}")
+        
+    except FileNotFoundError as e:
+        st.error(f"CSVファイルが見つかりません: {e}")
+        st.info("f_*.csv と p_*.csv ファイルをアップロードしてください")
+        
+        # ファイルアップロード機能
+        st.subheader("ファイルアップロード")
+        freq_file = st.file_uploader("周波数ファイル (f_*.csv)", type="csv")
+        phase_file = st.file_uploader("位相ファイル (p_*.csv)", type="csv")
+        
+        if freq_file and phase_file:
+            # アップロードされたファイルを一時保存
+            with open(f"f_{freq_file.name}", "wb") as f:
+                f.write(freq_file.getbuffer())
+            with open(f"p_{phase_file.name}", "wb") as f:
+                f.write(phase_file.getbuffer())
+            
+            st.success("ファイルがアップロードされました。ページを再読み込みしてください。")
+            if st.button("データを再読み込み"):
+                if 'data' in st.session_state:
+                    del st.session_state.data
+                st.rerun()
 
 if __name__ == "__main__":
     main()
