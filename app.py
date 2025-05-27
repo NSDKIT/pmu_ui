@@ -441,7 +441,7 @@ def main():
             time.sleep(0.1)  # アニメーション速度調整
             st.session_state.current_idx = min(max_idx, 
                                              st.session_state.current_idx + speed)
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.session_state.animation_running = False
     
