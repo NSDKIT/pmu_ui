@@ -8,7 +8,11 @@ from matplotlib.gridspec import GridSpec
 import time
 
 # 日本語フォント設定
-plt.rcParams['font.family'] = 'DejaVu Sans'
+try:
+    plt.rcParams['font.family'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'Takao', 'IPAexGothic', 'IPAPGothic', 'VL PGothic', 'Noto Sans CJK JP']
+except:
+    plt.rcParams['font.family'] = 'DejaVu Sans'
+plt.rcParams['axes.unicode_minus'] = False
 
 def auto_find_csv(prefix):
     """CSVファイルを自動検索"""
@@ -95,7 +99,7 @@ def create_plots(data, curr_idx, theta0):
     ax_polar1 = fig.add_subplot(gs[0,0], polar=True)
     ax_polar1.set_rlim(0, 1.1)
     ax_polar1.plot([theta[curr_idx]], [r[curr_idx]], 'o', markersize=10, color='tab:blue')
-    ax_polar1.set_title(f'θ₀基準 相対位相[deg] 円グラフ\\n時刻: {data["t"].iloc[curr_idx]}')
+    ax_polar1.set_title(f'θ₀基準 相対位相[deg] 円グラフ\n時刻: {data["t"].iloc[curr_idx]}', fontsize=10)
     
     # 中央上：xy散布図
     ax_xy = fig.add_subplot(gs[0,1])
@@ -134,7 +138,7 @@ def create_plots(data, curr_idx, theta0):
     ax_time2.set_ylabel('周波数[Hz]')
     ax_time2.set_ylim(np.nanmin(data['freq'])-0.2, np.nanmax(data['freq'])+0.2)
     
-    ax_time.set_title(f"時系列（θ₀基準相対位相＋周波数）\\nカレント: {data['t'].iloc[curr_idx]}")
+    ax_time.set_title(f"時系列（θ₀基準相対位相＋周波数）\nカレント: {data['t'].iloc[curr_idx]}", fontsize=10)
     
     lines1, labels1 = ax_time.get_legend_handles_labels()
     lines2, labels2 = ax_time2.get_legend_handles_labels()
@@ -175,24 +179,29 @@ def main():
         data = st.session_state.data
         
         # 制御パネル
-        col1, col2, col3, col4 = st.columns([1, 1, 2, 1])
+        col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 2, 1])
         
         with col1:
-            theta0 = st.selectbox("基準θ₀[deg]", options=list(range(0, 45, 5)), index=6)
+            if st.button("▶️ Start"):
+                st.session_state.auto_play = True
+                st.session_state.last_update = time.time()
         
         with col2:
-            speed = st.selectbox("再生速度", options=[1, 2, 5, 10, 20, 50, 100], index=3)
+            if st.button("⏹️ Stop"):
+                st.session_state.auto_play = False
         
         with col3:
+            speed = st.selectbox("再生速度", options=[1, 2, 5, 10, 20, 50, 100], index=3)
+        
+        with col4:
             curr_idx = st.slider("時間位置", 0, data['N']-1, st.session_state.curr_idx)
             st.session_state.curr_idx = curr_idx
         
-        with col4:
-            auto_play = st.checkbox("自動再生")
+        with col5:
+            theta0 = st.selectbox("基準θ₀[deg]", options=list(range(0, 45, 5)), index=6)
         
         # 自動再生機能
-        if auto_play and 'last_update' not in st.session_state:
-            st.session_state.last_update = time.time()
+        auto_play = st.session_state.get('auto_play', False)
         
         if auto_play:
             current_time = time.time()
@@ -203,6 +212,7 @@ def main():
                     st.rerun()
                 else:
                     st.session_state.curr_idx = 0  # リセット
+                    st.session_state.auto_play = False  # 終了時に停止
         
         # プロット作成・表示
         fig = create_plots(data, st.session_state.curr_idx, theta0)
