@@ -184,35 +184,57 @@ def main():
         with col1:
             if st.button("▶️ Start"):
                 st.session_state.auto_play = True
-                st.session_state.last_update = time.time()
+                st.rerun()
         
         with col2:
             if st.button("⏹️ Stop"):
                 st.session_state.auto_play = False
+                st.rerun()
         
         with col3:
             speed = st.selectbox("再生速度", options=[1, 2, 5, 10, 20, 50, 100], index=3)
         
         with col4:
-            curr_idx = st.slider("時間位置", 0, data['N']-1, st.session_state.curr_idx)
-            st.session_state.curr_idx = curr_idx
+            # 自動再生中はスライダーを無効化
+            if auto_play:
+                st.slider("時間位置", 0, data['N']-1, st.session_state.curr_idx, disabled=True)
+            else:
+                curr_idx = st.slider("時間位置", 0, data['N']-1, st.session_state.curr_idx)
+                st.session_state.curr_idx = curr_idx
         
         with col5:
             theta0 = st.selectbox("基準θ₀[deg]", options=list(range(0, 45, 5)), index=6)
         
+        # リアルタイム更新のためのプレースホルダー
+        if 'placeholder' not in st.session_state:
+            st.session_state.placeholder = st.empty()
+        
         # 自動再生機能
         auto_play = st.session_state.get('auto_play', False)
         
-        if auto_play:
-            current_time = time.time()
-            if current_time - st.session_state.get('last_update', 0) > 0.1:  # 100ms間隔
-                if st.session_state.curr_idx < data['N'] - 1:
-                    st.session_state.curr_idx = min(st.session_state.curr_idx + speed, data['N'] - 1)
-                    st.session_state.last_update = current_time
-                    st.rerun()
-                else:
-                    st.session_state.curr_idx = 0  # リセット
-                    st.session_state.auto_play = False  # 終了時に停止
+        # 自動再生状態の表示
+        status_col1, status_col2 = st.columns([3, 1])
+        with status_col1:
+            if auto_play:
+                st.success("🔄 自動再生中...")
+            else:
+                st.info("⏸️ 停止中")
+        
+        with status_col2:
+            if st.button("🔄 リセット"):
+                st.session_state.curr_idx = 0
+                st.rerun()
+        
+        # 自動再生の実行
+        if auto_play and st.session_state.curr_idx < data['N'] - 1:
+            # インデックスを進める
+            st.session_state.curr_idx = min(st.session_state.curr_idx + speed, data['N'] - 1)
+            time.sleep(0.1)  # 待機時間
+            st.rerun()
+        elif auto_play and st.session_state.curr_idx >= data['N'] - 1:
+            # 終了時の処理
+            st.session_state.auto_play = False
+            st.balloons()  # アニメーション終了の視覚的フィードバック
         
         # プロット作成・表示
         fig = create_plots(data, st.session_state.curr_idx, theta0)
