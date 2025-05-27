@@ -1,5 +1,5 @@
 # 現在のインデックスを取得（アニメーション状態に関係なく）
-    curr_idx = st.session_state.current_idximport streamlit as st
+curr_idx = st.session_state.current_idximport streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
